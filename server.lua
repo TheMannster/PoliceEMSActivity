@@ -1,199 +1,132 @@
--- CONFIG --
-roleList = Config.RoleList;
+local timeTracker = {}
+local onDuty = {}        -- src -> true when player is in emergency blip pool
+local activeBlipJob = {} -- src -> job name (for webhooks / cleanup)
 
--- CODE --
 Citizen.CreateThread(function()
-	while true do 
-		-- We wait a second and add it to their timeTracker 
-		Wait(1000); -- Wait a second
-		for k, v in pairs(timeTracker) do 
-			timeTracker[k] = timeTracker[k] + 1;
-		end 
-	end 
-end)
-timeTracker = {}
-hasPerms = {}
-permTracker = {}
-activeBlip = {}
-onDuty = {}
-prefix = '^9[^5Badger-Blips^9] ^3';
-AddEventHandler("playerDropped", function()
-	if onDuty[source] ~= nil then 
-		local tag = activeBlip[source];
-		local webHook = roleList[activeBlip[source]][3];
-		if webHook ~= nil then 
-			local time = timeTracker[source];
-			local now = os.time();
-			local startPlusNow = now + time;
-			local minutesActive = os.difftime(now, startPlusNow) / 60;
-			minutesActive = math.floor(math.abs(minutesActive))
-			sendToDisc('Player ' .. GetPlayerName(source) .. ' is now off duty', 'Player ' .. GetPlayerName(source) .. ' has gone off duty as ' .. tag, 
-			'Duration: ' .. minutesActive .. ' minutes',
-				webHook, 16711680)
-		end 
-	end
-	timeTracker[source] = nil;
-	onDuty[source] = nil;
-	permTracker[source] = nil;
-	hasPerms[source] = nil;
-	activeBlip[source] = nil;
-	-- Remove them from Blips:
-	TriggerEvent('eblips:remove', source)
-end)
-function sendToDisc(title, message, footer, webhookURL, color)
-	local embed = {}
-	embed = {
-		{
-			["color"] = color, -- GREEN = 65280 --- RED = 16711680
-			["title"] = "**".. title .."**",
-			["description"] = "** " .. message ..  " **",
-			["footer"] = {
-				["text"] = footer,
-			},
-		}
-	}
-	-- Start
-	-- TODO Input Webhook
-	PerformHttpRequest(webhookURL, 
-	function(err, text, headers) end, 'POST', json.encode({username = name, embeds = embed}), { ['Content-Type'] = 'application/json' })
-  -- END
-end
-RegisterCommand('duty', function(source, args, rawCommand)
-	-- The /blip command to toggle on and off the cop blip  
-	if hasPerms[source] ~= nil then 
-		if onDuty[source] == nil then 
-			local colorr = roleList[activeBlip[source]][2];
-			local tag = activeBlip[source];
-			local webHook = roleList[activeBlip[source]][3];
-			if webHook ~= nil then
-				sendToDisc('Player ' .. GetPlayerName(source) .. ' is now on duty', 'Player ' .. GetPlayerName(source) .. ' has gone on duty as ' .. tag, '',
-					webHook, 65280)
-			end
-			TriggerEvent('eblips:add', {name = tag .. GetPlayerName(source), src = source, color = colorr}); 
-			sendMsg(source, 'You have toggled your emergency blip ^2ON ^3and your Blip-Tag is: ' .. tag)
-			onDuty[source] = true;
-			timeTracker[source] = 0;
-			TriggerClientEvent('PoliceEMSActivity:GiveWeapons', source);
-		else 
-			onDuty[source] = nil;
-			local tag = activeBlip[source];
-			local webHook = roleList[activeBlip[source]][3];
-			if webHook ~= nil then
-				local time = timeTracker[source];
-				local now = os.time();
-				local startPlusNow = now + time;
-				local minutesActive = os.difftime(now, startPlusNow) / 60;
-				minutesActive = math.floor(math.abs(minutesActive))
-				sendToDisc('Player ' .. GetPlayerName(source) .. ' is now off duty', 'Player ' .. GetPlayerName(source) .. ' has gone off duty as ' .. tag, 
-				'Duration: ' .. minutesActive .. ' minutes',
-					webHook, 16711680)
-			end
-			TriggerClientEvent('PoliceEMSActivity:TakeWeapons', source);
-			timeTracker[source] = nil;
-			sendMsg(source, 'You have toggled your emergency blip ^1OFF')
-			TriggerEvent('eblips:remove', source)
-		end
-	else 
-		-- You are not a cop, you must be a cop in our discord to use it 
-		sendMsg(source, '^1ERROR: You must be an LEO on our discord to use this...')
-	end
-end)
-RegisterCommand('cops', function(source, args, rawCommand) 
-	-- Prints the active cops online with a /blip that is on 
-	sendMsg(source, 'The active cops on are:')
-	for id, _ in pairs(onDuty) do 
-		TriggerClientEvent('chatMessage', source, '^9[^4' .. id .. '^9] ^0' .. GetPlayerName(id));
-	end
-end)
-function sendMsg(src, msg) 
-	TriggerClientEvent('chatMessage', src, prefix .. msg);
-end
-RegisterCommand('bliptag', function(source, args, rawCommand)
-	-- The /blipTag command to toggle on and off the cop blip 
-	if hasPerms[source] ~= nil then 
-		if #args == 0 then 
-			-- List out which ones they have access to 
-			sendMsg(source, 'You have access to the following Blip-Tags:');
-			for i = 1, #permTracker[source] do 
-				-- List 
-				TriggerClientEvent('chatMessage', source, '^9[^4' .. i .. '^9] ^0' .. permTracker[source][i]);
-			end
-		else 
-			-- Choose their bliptag 
-			local selection = args[1];
-			if tonumber(selection) ~= nil then 
-				local sel = tonumber(selection);
-				local theirBlips = permTracker[source];
-				if sel <= #theirBlips then
-					-- Set up their tag
-					local tag = activeBlip[source];
-					local webHook = roleList[activeBlip[source]][3];
-					if onDuty[source] ~= nil then 
-						local time = timeTracker[source];
-						local now = os.time();
-						local startPlusNow = now + time;
-						local minutesActive = os.difftime(now, startPlusNow) / (60);
-						minutesActive = math.floor(math.abs(minutesActive))
-						sendToDisc('Player ' .. GetPlayerName(source) .. ' is now off duty', 'Player ' .. GetPlayerName(source) 
-							.. ' has gone off duty as ' .. tag, 'Duration: ' .. minutesActive,
-							webHook, 16711680)
-						timeTracker[source] = 0;
-					end
-					activeBlip[source] = permTracker[source][sel];
-					sendMsg(source, 'You have set your Blip-Tag to ^1' .. permTracker[source][sel]);
-					if onDuty[source] ~= nil then 
-						tag = activeBlip[source];
-						webHook = roleList[activeBlip[source]][3];
-						sendToDisc('Player ' .. GetPlayerName(source) .. ' is now on duty', 'Player ' .. GetPlayerName(source) .. ' has gone on duty as ' .. tag, '',
-							webHook, 65280) 
-						local colorr = roleList[activeBlip[source]][2]
-						TriggerEvent('eblips:remove', source)
-						TriggerEvent('eblips:add', {name = tag .. GetPlayerName(source), src = source, color = colorr});
-					end
-				else 
-					-- That is not a valid selection 
-					sendMsg(source, '^1ERROR: That is not a valid selection...')
-				end
-			else 
-				-- Not a number 
-				sendMsg(source, '^1ERROR: That is not a number...')
-			end
-		end
-	else 
-		-- You are not a cop, you must be a cop in our discord to use this 
-		sendMsg(source, '^1ERROR: You must be an LEO on our discord to use this...')
-	end 
+    while true do
+        Wait(1000)
+        for src in pairs(onDuty) do
+            timeTracker[src] = (timeTracker[src] or 0) + 1
+        end
+    end
 end)
 
+local function sendToDisc(title, message, footer, webhookURL, color)
+    if not webhookURL or webhookURL == '' then return end
+    local embed = {
+        {
+            ['color'] = color,
+            ['title'] = '**' .. title .. '**',
+            ['description'] = '** ' .. message .. ' **',
+            ['footer'] = { ['text'] = footer or '' },
+        },
+    }
+    PerformHttpRequest(webhookURL, function() end, 'POST',
+        json.encode({ username = 'PoliceEMSActivity', embeds = embed }),
+        { ['Content-Type'] = 'application/json' })
+end
 
-RegisterNetEvent('PoliceEMSActivity:RegisterUser')
-AddEventHandler('PoliceEMSActivity:RegisterUser', function()
-	local src = source
-	for k, v in ipairs(GetPlayerIdentifiers(src)) do
-			if string.sub(v, 1, string.len("discord:")) == "discord:" then
-				identifierDiscord = v
-			end
-	end
-	local perms = {}
-	if identifierDiscord then
-		local roleIDs = exports.Badger_Discord_API:GetDiscordRoles(src)
-		if not (roleIDs == false) then
-			for k, v in pairs(roleList) do
-				for j = 1, #roleIDs do
-					if exports.Badger_Discord_API:CheckEqual(v[1], roleIDs[j]) then
-						table.insert(perms, k);
-						activeBlip[src] = k;
-						hasPerms[src] = true;
-						print("[PEA] Gave Perms Sucessfully")
-					end
-				end
-			end
-			permTracker[src] = perms;
-		else
-			print("[PoliceEMSActivity] " .. GetPlayerName(src) .. " has not gotten their permissions cause roleIDs == false")
-		end
-	else
-		print("[PoliceEMSActivity] " .. GetPlayerName(src) .. " has not gotten their permissions cause discord was not detected...")
-	end
-	permTracker[src] = perms; 
+local function removeFromEmergencyBlips(src)
+    if not onDuty[src] then return end
+
+    local jobName = activeBlipJob[src]
+    local cfg = jobName and Config.Jobs[jobName]
+    if cfg and cfg.webhook then
+        local minutes = math.floor((timeTracker[src] or 0) / 60)
+        sendToDisc(
+            'Player ' .. GetPlayerName(src) .. ' is now off duty',
+            'Player ' .. GetPlayerName(src) .. ' has gone off duty as ' .. (cfg.tag or jobName),
+            'Duration: ' .. minutes .. ' minutes',
+            cfg.webhook,
+            16711680
+        )
+    end
+
+    TriggerEvent('eblips:remove', src)
+    onDuty[src] = nil
+    activeBlipJob[src] = nil
+    timeTracker[src] = nil
+end
+
+---Adds or refreshes blip when job is allowed and framework duty is on; removes otherwise.
+function syncEmergencyBlip(src)
+    local player = exports.qbx_core:GetPlayer(src)
+    if not player then
+        removeFromEmergencyBlips(src)
+        return
+    end
+
+    local job = player.PlayerData.job
+    local cfg = Config.Jobs[job.name]
+    local shouldShow = cfg and job.onduty
+
+    if not shouldShow then
+        removeFromEmergencyBlips(src)
+        return
+    end
+
+    if not onDuty[src] then
+        onDuty[src] = true
+        timeTracker[src] = 0
+        if cfg.webhook then
+            sendToDisc(
+                'Player ' .. GetPlayerName(src) .. ' is now on duty',
+                'Player ' .. GetPlayerName(src) .. ' has gone on duty as ' .. cfg.tag,
+                '',
+                cfg.webhook,
+                65280
+            )
+        end
+    end
+
+    activeBlipJob[src] = job.name
+    TriggerEvent('eblips:add', {
+        name = cfg.tag .. GetPlayerName(src),
+        src = src,
+        color = cfg.color,
+    })
+end
+
+AddEventHandler('QBCore:Server:PlayerLoaded', function(Player)
+    if Player and Player.PlayerData and Player.PlayerData.source then
+        syncEmergencyBlip(Player.PlayerData.source)
+    end
 end)
+
+AddEventHandler('QBCore:Server:SetDuty', function(src, _)
+    syncEmergencyBlip(src)
+end)
+
+AddEventHandler('QBCore:Server:OnJobUpdate', function(src, _)
+    syncEmergencyBlip(src)
+end)
+
+AddEventHandler('QBCore:Server:OnPlayerUnload', function(src)
+    removeFromEmergencyBlips(src)
+end)
+
+AddEventHandler('playerDropped', function()
+    removeFromEmergencyBlips(source)
+end)
+
+local function sendMsg(src, msg)
+    TriggerClientEvent('chat:addMessage', src, {
+        color = { 255, 255, 255 },
+        multiline = true,
+        args = { 'Emergency Blips', msg },
+    })
+end
+
+RegisterCommand('cops', function(source, _, _)
+    if not next(onDuty) then
+        sendMsg(source, 'No eligible personnel are on framework duty right now.')
+        return
+    end
+    sendMsg(source, 'On-duty emergency personnel (framework duty + eligible job):')
+    for id in pairs(onDuty) do
+        TriggerClientEvent('chat:addMessage', source, {
+            color = { 255, 255, 255 },
+            args = { tostring(id), GetPlayerName(id) or 'unknown' },
+        })
+    end
+end, false)
